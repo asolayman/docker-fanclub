@@ -1,0 +1,111 @@
+version: "3"
+
+services:
+
+  # Docker Container Updater with WatchTower
+  updater:
+    image: v2tec/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -i 3600
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  # Docker Management with Portainer
+  manager:
+    image: portainer/portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+
+  # Shared Cloud with Owncloud
+  cloud:
+    image: owncloud/server:latest
+    restart: unless-stopped
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    ports:
+      - "8001:8080"
+
+  
+  # CMS Blog with Wordpress
+  blog:
+    image: dalareo/wordpress-ldap:latest
+    restart: unless-stopped
+    depends_on:
+      - sql
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    ports:
+      - "8002:80"
+      - "8102:443"
+    environment:
+      - WORDPRESS_DB_HOST=sql
+      - WORDPRESS_DB_USER=wordpress 
+      - WORDPRESS_DB_PASSWORD=testpass
+      - WORDPRESS_DB_NAME=wordpress
+
+  sql:
+    image: mysql:5.6
+    restart: unless-stopped
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    environment:
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wordpress
+      - MYSQL_PASSWORD=testpass
+      - MYSQL_ROOT_PASSWORD=testpass
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    ports:
+      - "8005:8080"
+
+  # Chat Platform with RocketChat
+  chat:
+    image: rocket.chat:latest
+    restart: unless-stopped
+    depends_on: 
+      - mongo
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    environment:
+     - ROOT_URL=http://khaos.fr
+     - MONGO_URL=mongodb://mongo:27017/rocketchat
+    ports:
+      - "8003:3000"
+
+
+  mongo:
+    image: mongo:3.0
+    restart: unless-stopped
+    command: mongod --smallfiles --oplogSize 128
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+  
+  git:
+    image: gitea/gitea:latest
+    restart: unless-stopped
+    ports:
+      - 222:22
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+  

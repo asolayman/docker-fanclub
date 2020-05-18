@@ -1,0 +1,174 @@
+version: "3"
+
+services:
+
+  # Reverse Proxy with Traefik
+  reverse-proxy:
+    image: traefik
+    restart: unless-stopped
+    command: 
+      - --api
+      - --docker
+      - --docker.watch
+      - --entryPoints=Name:http Address::80 Redirect.EntryPoint:https
+      - --entryPoints=Name:https Address::443 TLS
+      - --defaultentrypoints=http,https
+      - --insecureskipverify
+      - --acme=true
+      - --acme.email=${TRAEFIK_MAIL}
+      - --acme.storage=acme.json
+      - --acme.entrypoint=https
+      - --acme.onhostrule=true
+      - --acme.ondemand=false
+      - --acme.httpchallenge 
+      - --acme.httpchallenge.entrypoint=http 
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 80:80
+      - 443:443
+    labels:
+      - traefik.frontend.rule=Host:${TRAEFIK_HOST}
+      - traefik.port=8080
+
+  # Docker Container Updater with WatchTower
+  updater:
+    image: v2tec/watchtower
+    restart: unless-stopped
+    command: -i 3600
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - traefik.enable=false
+
+  # Docker Management with Portainer
+  manager:
+    image: portainer/portainer
+    restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - traefik.frontend.rule=Host:${PORTAINER_HOST}
+      - traefik.port=9000
+
+  # Shared Cloud with Owncloud
+  cloud:
+    image: owncloud/server:latest
+    restart: unless-stopped
+    labels:
+      - traefik.frontend.rule=Host:${OWNCLOUD_HOST}
+  
+  git:
+    image: gitea/gitea:latest
+    restart: unless-stopped
+    ports:
+      - 222:22
+    labels:
+      - traefik.frontend.rule=Host:${GITEA_HOST}
+      - traefik.port=3000
+  
+  # CMS Blog with Wordpress
+  blog:
+    image: dalareo/wordpress-ldap:latest
+    restart: unless-stopped
+    depends_on:
+      - sql
+    labels:
+      - traefik.frontend.rule=Host:${WORDPRESS_HOST}
+    environment:
+      - WORDPRESS_DB_HOST=sql
+      - WORDPRESS_DB_USER=wordpress 
+      - WORDPRESS_DB_PASSWORD=${WORDPRESS_PASSWD}
+      - WORDPRESS_DB_NAME=wordpress
+
+  sql:
+    image: mysql:5.6
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=wordpress
+      - MYSQL_USER=wordpress
+      - MYSQL_PASSWORD=${WORDPRESS_PASSWD}
+      - MYSQL_ROOT_PASSWORD=${WORDPRESS_PASSWD}
+    labels:
+      - traefik.enable=false
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    labels:
+      - traefik.frontend.rule=Host:${ADMINER_HOST}
+
+  # Chat Platform with RocketChat
+  chat:
+    image: rocket.chat:latest
+    restart: unless-stopped
+    depends_on: 
+      - mongo
+    environment:
+     - ROOT_URL=http://${ROCKETCHAT_HOST}
+     - MONGO_URL=mongodb://mongo:27017/rocketchat
+    labels:
+      - traefik.backend=chat
+      - traefik.frontend.rule=Host:${ROCKETCHAT_HOST}
+      - traefik.port=3000
+
+  mongo:
+    image: mongo:3.0
+    restart: unless-stopped
+    command: mongod --smallfiles --oplogSize 128
+    labels:
+      - traefik.enable=false
+  
+  # IPA Management with FreeIPA
+  ipa:
+    image: adelton/freeipa-server:centos-7
+    restart: unless-stopped
+    hostname: ${FREEIPA_HOST}
+    environment:
+      - IPA_SERVER_HOSTNAME=${FREEIPA_HOST}
+    tty: true
+    stdin_open: true
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    sysctls:
+      - net.ipv6.conf.lo.disable_ipv6=0
+      - net.ipv6.conf.all.disable_ipv6=0
+    security_opt:
+      - "seccomp:unconfined"
+    command:
+      - -U 
+      - --domain=${IPA_DOMAIN}
+      - --realm=${IPA_DOMAIN}
+      - --http-pin=${IPA_PASSWD}
+      - --dirsrv-pin=${IPA_PASSWD}
+      - --ds-password=${IPA_PASSWD}
+      - --admin-password=${IPA_PASSWD}
+      - --no-host-dns
+      - --no-dnssec-validation
+      - --setup-dns
+      - --auto-forwarders
+      - --allow-zone-overlap
+      - --unattended
+    ports:
+      - "53:53/udp"
+      - "53:53"
+      - "389:389"
+      - "636:636"
+      - "88:88"
+      - "464:464"
+      - "88:88/udp"
+      - "464:464/udp"
+      - "123:123/udp"
+      - "7389:7389"
+      - "9443:9443"
+      - "9444:9444"
+      - "9445:9445"
+    labels:
+      - traefik.frontend.rule=Host:${FREEIPA_HOST}
+      - traefik.port=443
+      - traefik.protocol=https
+      - traefik.frontend.entryPoints=https
+      - traefik.frontend.insecureskipverify=true
